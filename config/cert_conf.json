@@ -1,0 +1,34 @@
+{   
+    "default_key_alg": "EC -pkeyopt ec_paramgen_curve:prime256v1",
+    "services": [
+        {
+            "name": "broker",
+            "subject_str": "/C=DE/ST=NRW/L=Sankt Augustine/O=Fraunhofer/OU=FIT/CN=broker"
+        },
+        {
+            "name": "sm",
+            "subject_str": "/C=DE/ST=NRW/L=Sankt Augustine/O=Fraunhofer/OU=FIT/CN=sm",
+            "key_alg": "RSA -pkeyopt rsa_keygen_bits:4096"
+        },
+        {
+            "name": "mdf",
+            "subject_str": "/C=DE/ST=NRW/L=Sankt Augustine/O=Fraunhofer/OU=FIT/CN=mdf"
+        },
+        {
+            "name": "scral",
+            "subject_str": "/C=DE/ST=NRW/L=Sankt Augustine/O=Fraunhofer/OU=FIT/CN=scral"
+        },
+        {
+            "name": "rc",
+            "subject_str": "/C=DE/ST=NRW/L=Sankt Augustine/O=Fraunhofer/OU=FIT/CN=rc"
+        },
+        {
+            "name": "lsgc",
+            "subject_str": "/C=DE/ST=NRW/L=Sankt Augustine/O=Fraunhofer/OU=FIT/CN=lsgc"
+        },
+        {
+            "name": "dfm",
+            "subject_str": "/C=DE/ST=NRW/L=Sankt Augustine/O=Fraunhofer/OU=FIT/CN=dfm"
+        }
+    ]
+}
