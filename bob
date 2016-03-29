@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 import argparse
 import json
@@ -7,16 +7,20 @@ import shlex
 import subprocess
 
 CONFIG = {
-        "default_key_alg": "EC -pkeyopt ec_paramgen_curve:prime256v1",
-        "cert_path": "./pub_certs/",
-        "key_path": "./keys/",
-        "services": [
-            {'name': 'test', 'subject_str': '/CN=test'},
-        ],
+        "default_key_alg": "EC -pkeyopt ec_paramgen_curve:prime256v1 -pkeyopt ec_param_enc:named_curve",
+        "out_path": "./certs",
+        "cert_file": "cert.pem",
+        "key_file": "key.pem",
+        "services": [],
 }
 
 
 def openssl(*args):
+    """ Run the OpenSSL command
+
+    Args:
+        args -- A list of arguments.
+    """
     cmdline = ['openssl']
     for arg in args:
         cmdline += shlex.split(arg)
@@ -24,12 +28,32 @@ def openssl(*args):
 
 
 def create_key(service, key_path, key_alg):
+    """ Create a private key with the given algorithmen
+
+    Args:
+    service -- the name of the service
+    key_path -- the path where the key file will be stored
+    key_alg -- the algoithmen which should be used
+
+    Returns:
+        the path to the newly created private key file as a string.
+    """
     key_file = str(key_path.joinpath('{}.key.pem'.format(service)))
     openssl('genpkey -outform PEM -algorithm', key_alg, '-out', shlex.quote(key_file))
     return key_file
 
 
 def create_cert(service, cert_path, key_file, subject_str):
+    """ Create the certificate for the service
+
+    Args:
+        service -- the name of the service
+        cert_path -- the path to the folder where the certificate should be stored.
+        subject_str -- the subject string for the certificate
+
+    Retruns:
+        the path to the newly created certificate as a string.
+    """
     cert_file = str(cert_path.joinpath('{}.cer.pem'.format(service)))
     openssl('req -new -days 365 -nodes -x509 -outform PEM -subj', shlex.quote(subject_str),
             '-out', shlex.quote(cert_file),
@@ -38,14 +62,30 @@ def create_cert(service, cert_path, key_file, subject_str):
 
 
 def mkdir(path):
+    """ Create a new directory with the path
+
+    Args:
+        path -- the path to the new directory
+    Return:
+        the path object
+    """
     try:
         path.mkdir(mode=0o700)
     except OSError:
         pass
         # ignore the error since it is already there
+    return path
 
 
 def read_config(config, json_data_file):
+    """ Read the config for bob
+
+    Args:
+        config -- the configuration object whith the default values
+        json_data_file -- the json file which holds the configuration inforation
+    Returns:
+        the updated configuration
+    """
     with json_data_file:
         loaded_conf = json.load(json_data_file)
         config.update(loaded_conf)
@@ -53,6 +93,7 @@ def read_config(config, json_data_file):
 
 
 def parse_args():
+    """ Prarse the arguments """
     parser = argparse.ArgumentParser(description='Bob the certificate builder.')
     parser.add_argument('--config', default='./config/cert_conf.json',
                         type=argparse.FileType('r'),
@@ -60,23 +101,44 @@ def parse_args():
     return parser.parse_args()
 
 
-def main():
-    args = parse_args()
-    config = read_config(CONFIG, args.config)
+def create_credentials(out_path, services, default_key_alg):
+    """ Create the creadentials for all services
 
-    key_path = pathlib.Path(config['key_path'])
-    cert_path = pathlib.Path(config['cert_path'])
-
-    # Create folders
-    mkdir(cert_path)
-    mkdir(key_path)
-
-    for s in config['services']:
+    Args:
+        out_path -- the path where the new certificates should be stored
+        service -- a list of the services
+        default_key_alg -- the default algorithmen for which keys should be created
+    """
+    certs = {}
+    for s in services:
         service = s['name']
         subject_str = s['subject_str']
-        key_alg = s.get('key_alg', config['default_key_alg'])
-        key_file = create_key(service, key_path, key_alg)
-        create_cert(service, cert_path, key_file, subject_str)
+        key_alg = s.get('key_alg', default_key_alg)
+        service_path = mkdir(out_path.joinpath(service))
+        key_file = create_key(service, service_path, key_alg)
+        cert_file = create_cert(service, service_path, key_file, subject_str)
+
+        certs[service] = cert_file
+
+    for s in services:
+        service = s['name']
+        confidant_names = s['confidants']
+        filename = '{}_confidants.pem'.format(service)
+        services_confidants = out_path.joinpath(service).joinpath(filename)
+        with services_confidants.open('w') as confidants_file:
+            for confidant in confidant_names:
+                with open(certs[confidant]) as confidant_cert:
+                    for line in confidant_cert:
+                        confidants_file.write(line)
+
+
+def main():
+    """ Main function """
+    args = parse_args()
+    config = read_config(CONFIG, args.config)
+    out_path = mkdir(pathlib.Path(config['out_path']))
+
+    create_credentials(out_path, config['services'], config['default_key_alg'])
 
 
 if __name__ == '__main__':
