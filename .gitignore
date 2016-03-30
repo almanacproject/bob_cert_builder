@@ -1,1 +1,5 @@
 *.pem
+dist/
+build/
+bob/__pycache__/
+bob.egg-info/
