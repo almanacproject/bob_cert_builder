@@ -27,38 +27,75 @@ def openssl(*args):
     subprocess.check_call(cmdline)
 
 
-def create_key(service, key_path, key_alg):
-    """ Create a private key with the given algorithmen
+class Service(object):
 
-    Args:
-    service -- the name of the service
-    key_path -- the path where the key file will be stored
-    key_alg -- the algoithmen which should be used
+    """A Service object hold the name and certificate for a service"""
 
-    Returns:
-        the path to the newly created private key file as a string.
-    """
-    key_file = str(key_path.joinpath('{}.key.pem'.format(service)))
-    openssl('genpkey -outform PEM -algorithm', key_alg, '-out', shlex.quote(key_file))
-    return key_file
+    def __init__(self, name, key_alg, out_path, confidant_names):
+        self.name = name
+        self.path = mkdir(out_path.joinpath(name))
+        self.key_file = None
+        self.key_alg = key_alg
+        self.cert_file = None
+        self.formats = []
+        self.create_key()
+        self.confidants = confidant_names
+        self.confidat_file = None
 
+    def create_key(self):
+        """ Create a private key with the given algorithmen
 
-def create_cert(service, cert_path, key_file, subject_str):
-    """ Create the certificate for the service
+        Args:
+            self --
 
-    Args:
-        service -- the name of the service
-        cert_path -- the path to the folder where the certificate should be stored.
-        subject_str -- the subject string for the certificate
+        Returns:
+            the path to the newly created private key file as a string.
+        """
+        self.key_file = str(self.path.joinpath('{}.key.pem'.format(self.name)))
+        openssl('genpkey -outform PEM -algorithm', self.key_alg, '-out', shlex.quote(self.key_file))
+        return self.key_file
 
-    Retruns:
-        the path to the newly created certificate as a string.
-    """
-    cert_file = str(cert_path.joinpath('{}.cer.pem'.format(service)))
-    openssl('req -new -days 365 -nodes -x509 -outform PEM -subj', shlex.quote(subject_str),
-            '-out', shlex.quote(cert_file),
-            '-key', shlex.quote(key_file))
-    return cert_file
+    def create_cert(self, subject_str):
+        """ Create the certificate for the service
+
+        Args:
+            self --
+            subject_str -- the subject string for the certificate
+
+        Retruns:
+            the path to the newly created certificate as a string.
+        """
+        self.cert_file = str(self.path.joinpath('{}.cer.pem'.format(self.name)))
+        openssl('req -new -days 365 -nodes -x509 -outform PEM -subj', shlex.quote(subject_str),
+                '-out', shlex.quote(self.cert_file),
+                '-key', shlex.quote(self.key_file))
+        return self.cert_file
+
+    def create_confidants(self, service_dict):
+        filename = '{}.confidants.pem'.format(self.name)
+        services_confidants = self.path.joinpath(filename)
+        with services_confidants.open('w') as confidants_file:
+            for confidant in self.confidants:
+                with open(service_dict[confidant].cert_file) as confidant_cert:
+                    for line in confidant_cert:
+                        confidants_file.write(line)
+        self.confidat_file = str(services_confidants)
+
+    def create_pkcs12_keystore(self):
+        filename = '{}.keystore.p12'.format(self.name)
+        openssl('pkcs12 -export',
+                '-in', self.cert_file,
+                '-inkey', self.key_file,
+                '-name', self.name,
+                '-out', filename)
+
+    def create_pkcs12_truststore(self):
+        filename = '{}.keystore.p12'.format(self.name)
+        openssl('pkcs12 -export',
+                '-in', self.cert_file,
+                '-nokeys'
+                '-name', self.name,
+                '-out', filename)
 
 
 def mkdir(path):
@@ -109,27 +146,20 @@ def create_credentials(out_path, services, default_key_alg):
         service -- a list of the services
         default_key_alg -- the default algorithmen for which keys should be created
     """
-    certs = {}
+    service_dict = {}
+
     for s in services:
-        service = s['name']
+        service_name = s['name']
         subject_str = s['subject_str']
         key_alg = s.get('key_alg', default_key_alg)
-        service_path = mkdir(out_path.joinpath(service))
-        key_file = create_key(service, service_path, key_alg)
-        cert_file = create_cert(service, service_path, key_file, subject_str)
-
-        certs[service] = cert_file
-
-    for s in services:
-        service = s['name']
         confidant_names = s['confidants']
-        filename = '{}_confidants.pem'.format(service)
-        services_confidants = out_path.joinpath(service).joinpath(filename)
-        with services_confidants.open('w') as confidants_file:
-            for confidant in confidant_names:
-                with open(certs[confidant]) as confidant_cert:
-                    for line in confidant_cert:
-                        confidants_file.write(line)
+        service = Service(service_name, key_alg, out_path, confidant_names)
+        service.create_cert(subject_str)
+
+        service_dict[service.name] = service
+
+    for service in service_dict.values():
+        service.create_confidants(service_dict)
 
 
 def main():
