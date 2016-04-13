@@ -1,5 +1,22 @@
-*.pem
 dist/
 build/
 bob/__pycache__/
 bob.egg-info/
+
+# ignore certs and keys
+*.pem
+*.der
+*.jks
+*.p12
+
+# vim garbage
+.local.vimrc
+*.swp
+*.swo
+
+# Python files
+*.pyc
+*.pyo
+
+# Java garbage
+*.class

@@ -1,0 +1,53 @@
+#!/bin/sh
+
+set -e
+
+result_json=$(PYTHONPATH=".." python3 -m bob --config cert_conf.json)
+
+printf "%s" "$result_json" | jq .
+
+alice_pw=$(printf "%s" "$result_json" | jq -r .alice.password)
+alice_keystore=$(printf "%s" "$result_json" | jq -r .alice.formats.JKS.keystore)
+alice_truststore=$(printf "%s" "$result_json" | jq -r .alice.formats.JKS.truststore)
+
+
+test_server() {
+    pid="$1"
+    kill -0 "$pid"
+}
+
+
+
+
+(cd java;
+java -Djavax.net.ssl.keyStore="../$alice_keystore" \
+     -Djavax.net.ssl.keyStorePassword="$alice_pw" \
+     -Djavax.net.ssl.keyStoreType=jks \
+     -Djavax.net.ssl.trustStore="../$alice_truststore" \
+     -Djavax.net.ssl.trustStorePassword="$alice_pw" \
+     -Djavax.net.ssl.trustStoreType=jks \
+     SSLServer 
+)&
+
+sleep 3
+
+server_pid="$!"
+
+
+printf "test\n" | openssl s_client -host 127.0.0.1 -port 4443 \
+                                 -quiet -tls1_2 -no_ign_eof \
+                                 -CAfile certs/bob/bob.truststore.pem \
+                                 -cert certs/bob/bob.cer.pem \
+                                 -key certs/bob/bob.key.pem \
+                                 -verify 1 -verify_return_error
+
+printf "exit\n" | openssl s_client -host 127.0.0.1 -port 4443 \
+                                 -quiet -tls1_2 -no_ign_eof \
+                                 -CAfile certs/bob/bob.truststore.pem \
+                                 -cert certs/bob/bob.cer.pem \
+                                 -key certs/bob/bob.key.pem \
+                                 -verify 1 -verify_return_error
+
+wait "$server_pid"
+
+printf "TEST\n" 

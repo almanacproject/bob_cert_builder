@@ -1,3 +1,7 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+
 """A setuptools based setup module.
 
 See:
@@ -105,7 +109,7 @@ setup(
     # pip to create the appropriate form of executable for the target platform.
     entry_points={
         'console_scripts': [
-            'bob=bob:main',
+            'bob=bob.__main__:main',
         ],
     },
 )

@@ -2,9 +2,14 @@
 
 import argparse
 import json
+import os
 import pathlib
+import random
 import shlex
+import shutil
+import string
 import subprocess
+import sys
 
 CONFIG = {
         "default_key_alg": "EC -pkeyopt ec_paramgen_curve:prime256v1 -pkeyopt ec_param_enc:named_curve",
@@ -12,35 +17,81 @@ CONFIG = {
         "cert_file": "cert.pem",
         "key_file": "key.pem",
         "services": [],
+        "password_length": 10
 }
 
 
-def openssl(*args):
+def openssl(cmd, *args, **kwargs):
+    openssl_with_fds(cmd, (), *args, **kwargs)
+
+
+def openssl_with_fds(cmd, pass_fds, *args, **kwargs):
     """ Run the OpenSSL command
 
     Args:
         args -- A list of arguments.
     """
-    cmdline = ['openssl']
-    for arg in args:
-        cmdline += shlex.split(arg)
-    subprocess.check_call(cmdline)
+    execute('openssl', cmd, pass_fds, args, kwargs)
 
 
-class Service(object):
+def keytool(cmd, *args, **kwargs):
+    execute('keytool', cmd, (), args, kwargs)
 
-    """A Service object hold the name and certificate for a service"""
 
-    def __init__(self, name, key_alg, out_path, confidant_names):
+def execute(tool, cmd, pass_fds, args, kwargs):
+    quoted_args = (shlex.quote(arg) for arg in args)
+    qouted_kwargs = {key: shlex.quote(arg) for key, arg in kwargs.items()}
+
+    qouted_command = cmd.format(*quoted_args, **qouted_kwargs)
+
+    cmdline = [tool] + shlex.split(qouted_command)
+    # print(' '.join(cmdline))
+    proc = subprocess.Popen(cmdline, pass_fds=pass_fds, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    proc.wait()
+    if proc.returncode != 0:
+        raise subprocess.CalledProcessError(proc.returncode, ' '.join(cmdline))
+
+
+class password_pipe(object):
+    def __init__(self, password):
+        self.password = password
+        self.__write_fd = None
+        self.__read_fd = None
+
+    def __enter__(self):
+        self.__read_fd, self.__write_fd = os.pipe()
+        os.set_inheritable(self.__read_fd, True)
+        os.write(self.__write_fd, self.password.encode())
+        os.write(self.__write_fd, '\n'.encode())
+        return self.__read_fd
+
+    def __exit__(self, type, value, traceback):
+        os.close(self.__write_fd)
+        os.close(self.__read_fd)
+
+
+class ConvertMixin(object):
+
+    def convert_to(self, format):
+        if format in self.format_fns:
+            self.format_fns[format](self)
+
+    def name_path(self, template):
+        return str(self.path.joinpath(template.format(self.name)))
+
+
+class Key(ConvertMixin):
+
+    """A representation of the key file"""
+
+    def __init__(self, name, path, key_alg):
         self.name = name
-        self.path = mkdir(out_path.joinpath(name))
-        self.key_file = None
         self.key_alg = key_alg
-        self.cert_file = None
-        self.formats = []
+        self.path = path
+        self.file = None
+        self.formats = {}
+
         self.create_key()
-        self.confidants = confidant_names
-        self.confidat_file = None
 
     def create_key(self):
         """ Create a private key with the given algorithmen
@@ -51,51 +102,145 @@ class Service(object):
         Returns:
             the path to the newly created private key file as a string.
         """
-        self.key_file = str(self.path.joinpath('{}.key.pem'.format(self.name)))
-        openssl('genpkey -outform PEM -algorithm', self.key_alg, '-out', shlex.quote(self.key_file))
-        return self.key_file
+        self.file = self.name_path('{}.key.pem'.format(self.name))
+        cmd = 'genpkey -outform PEM -algorithm {} -out {{}}'.format(self.key_alg)
+        openssl(cmd, self.file)
+        return self.file
 
-    def create_cert(self, subject_str):
+    def convert_to_der(self):
+        if 'DER' not in self.formats:
+            der_file = self.name_path('{}.key.der')
+            openssl('pkey -outform DER -in {} -out {}', self.file, der_file)
+            self.formats['DER'] = der_file
+
+    format_fns = {'DER': convert_to_der}
+
+
+class Certificate(ConvertMixin):
+    """ Represantation of a certificate """
+
+    def __init__(self, name, path, key, subject_str):
         """ Create the certificate for the service
 
         Args:
             self --
             subject_str -- the subject string for the certificate
 
-        Retruns:
-            the path to the newly created certificate as a string.
         """
-        self.cert_file = str(self.path.joinpath('{}.cer.pem'.format(self.name)))
-        openssl('req -new -days 365 -nodes -x509 -outform PEM -subj', shlex.quote(subject_str),
-                '-out', shlex.quote(self.cert_file),
-                '-key', shlex.quote(self.key_file))
-        return self.cert_file
+        self.name = name
+        self.path = path
+        self.key = key
+        self.file = None
+        self.formats = {}
 
-    def create_confidants(self, service_dict):
-        filename = '{}.confidants.pem'.format(self.name)
+        self.file = self.name_path('{}.cer.pem')
+        openssl('req -new -days 365 -nodes -x509 -outform PEM -subj {} -out {} -key {}',
+                subject_str,
+                self.file,
+                self.key.file)
+        openssl('x509 -in {} -setalias {} -out {}',
+                self.file, self.name, self.file)
+
+    def convert_to_der(self):
+        if 'DER' not in self.formats:
+            der_file = self.name_path('{}.cer.der')
+            openssl('x509 -outform DER -in {} -out {}', self.file, der_file)
+            self.formats['DER'] = der_file
+
+    format_fns = {'DER': convert_to_der}
+
+
+class Service(ConvertMixin):
+
+    """A Service object hold the name and certificate for a service"""
+
+    def __init__(self, name, key_alg, out_path, confidant_names, formats, subject_str, pw_len=10):
+        self.name = name
+        self.confidants = confidant_names
+        self.path = mkdir(out_path.joinpath(name))
+        self.password = random_password(pw_len)
+        self.confidat_file = None
+        self.key = Key(name, self.path, key_alg)
+        self.cert = Certificate(name, self.path, self.key, subject_str)
+        self.formats = None
+
+        self.set_formats(formats)
+
+    def set_formats(self, formats):
+        format_set = set(formats)
+        self.formats = dict.fromkeys(format_set, None)
+        self.formats['PEM'] = {'key': self.key.file, 'cert': self.cert.file}
+
+    def convert_to_der(self):
+        self.key.convert_to_der()
+        self.cert.convert_to_der()
+        self.formats['DER'] = {'key': self.key.formats['DER'], 'cert': self.cert.formats['DER']}
+
+    def convert_to_pkcs12_keystore(self):
+        if self.formats['PKCS12'] is None:
+            filename = '{}.keystore.p12'.format(self.name)
+            store = str(self.path.joinpath(filename))
+            with password_pipe(self.password) as pipe_fd:
+                passout = 'fd:{}'.format(pipe_fd)
+                openssl_with_fds('pkcs12 -export -in {} -inkey {} -name {} -passout {} -out {}', (pipe_fd,),
+                                 self.cert.file, self.key.file, self.name, passout, store)
+            self.formats['PKCS12'] = store
+
+    def convert_to_jks_keystore(self):
+        self.convert_to_pkcs12_keystore()
+        self.convert_to_der()
+        filename = '{}.keystore.jks'.format(self.name)
+        keystore = self.path.joinpath(filename)
+        try:
+            keystore.unlink()
+        except FileNotFoundError:
+            pass
+        keystore_str = str(keystore)
+        keytool('-importkeystore -noprompt '
+                '-srcstoretype PKCS12 -deststoretype JKS '
+                '-srcstorepass {password} -deststorepass {password} '
+                '-srckeystore {srckeystore} -destkeystore {destkeystore} ',
+                password=self.password,
+                srckeystore=self.formats['PKCS12'],
+                destkeystore=keystore_str)
+        self.formats['JKS'] = {'keystore': keystore_str}
+
+    def create_truststore(self, service_dict):
+        self.create_pem_truststore(service_dict)
+        if 'JKS' in self.formats:
+            self.create_jks_truststore(service_dict)
+
+    def create_jks_truststore(self, service_dict):
+        filename = '{}.truststore.jks'.format(self.name)
+        truststore = self.path.joinpath(filename)
+        try:
+            truststore.unlink()
+        except FileNotFoundError:
+            pass
+        truststore_str = str(truststore)
+        for confidant in self.confidants:
+            confidant_cert = service_dict[confidant].cert
+            if 'DER' not in confidant_cert.formats:
+                confidant_cert.convert_to_der()
+            der_cert = confidant_cert.formats['DER']
+            keytool('-importcert -noprompt -alias {alias} -file {cert} -keystore {keystore} -storetype JKS -storepass {password}',
+                    alias=confidant,
+                    cert=der_cert,
+                    keystore=truststore_str,
+                    password=self.password)
+        self.formats['JKS']['truststore'] = truststore_str
+
+    def create_pem_truststore(self, service_dict):
+        filename = '{}.truststore.pem'.format(self.name)
         services_confidants = self.path.joinpath(filename)
         with services_confidants.open('w') as confidants_file:
             for confidant in self.confidants:
-                with open(service_dict[confidant].cert_file) as confidant_cert:
+                with open(service_dict[confidant].cert.file) as confidant_cert:
                     for line in confidant_cert:
                         confidants_file.write(line)
         self.confidat_file = str(services_confidants)
 
-    def create_pkcs12_keystore(self):
-        filename = '{}.keystore.p12'.format(self.name)
-        openssl('pkcs12 -export',
-                '-in', self.cert_file,
-                '-inkey', self.key_file,
-                '-name', self.name,
-                '-out', filename)
-
-    def create_pkcs12_truststore(self):
-        filename = '{}.keystore.p12'.format(self.name)
-        openssl('pkcs12 -export',
-                '-in', self.cert_file,
-                '-nokeys'
-                '-name', self.name,
-                '-out', filename)
+    format_fns = {'DER': convert_to_der, 'PKCS12': convert_to_pkcs12_keystore, 'JKS': convert_to_jks_keystore}
 
 
 def mkdir(path):
@@ -138,7 +283,7 @@ def parse_args():
     return parser.parse_args()
 
 
-def create_credentials(out_path, services, default_key_alg):
+def create_credentials(config):
     """ Create the creadentials for all services
 
     Args:
@@ -146,6 +291,13 @@ def create_credentials(out_path, services, default_key_alg):
         service -- a list of the services
         default_key_alg -- the default algorithmen for which keys should be created
     """
+
+    out_path = setup(config)
+
+    services = config['services']
+    default_key_alg = config['default_key_alg']
+    pw_len = config['password_length']
+
     service_dict = {}
 
     for s in services:
@@ -153,23 +305,64 @@ def create_credentials(out_path, services, default_key_alg):
         subject_str = s['subject_str']
         key_alg = s.get('key_alg', default_key_alg)
         confidant_names = s['confidants']
-        service = Service(service_name, key_alg, out_path, confidant_names)
-        service.create_cert(subject_str)
-
+        formats = ('DER', 'PKCS12', 'JKS')
+        service = Service(service_name, key_alg, out_path, confidant_names, formats, subject_str, pw_len)
         service_dict[service.name] = service
 
     for service in service_dict.values():
-        service.create_confidants(service_dict)
+        for format in service.formats:
+            service.convert_to(format)
+        service.create_truststore(service_dict)
+
+    return service_dict.values()
+
+
+def setup(config):
+    return mkdir(pathlib.Path(config['out_path']))
+
+
+def test_for_cmds():
+    if shutil.which('openssl') is None:
+        print('OpenSSL is missing')
+        return False
+
+    if shutil.which('keytool') is None:
+        print('Java KeyTool is missing')
+        return False
+    return True
+
+
+def random_password(length):
+    """ Create Random strings
+
+    The random string is created out of the set of `string.ascii_letters` and `string.digits`.
+
+    Args:
+        length -- the length of the new random string
+
+    Returns:
+        A random string cosisting out of ascii letters and the decimal digits.
+    """
+    choices = string.ascii_letters + string.digits
+    randdom_gen = (random.SystemRandom().choice(choices) for _ in range(length))
+    return ''.join(randdom_gen)
+
+
+def print_services(services):
+    gen = {service.name: {'password': service.password, 'formats': service.formats}
+           for service in services}
+    print(json.dumps(gen))
 
 
 def main():
     """ Main function """
+    if not test_for_cmds():
+        sys.exit(1)
     args = parse_args()
     config = read_config(CONFIG, args.config)
-    out_path = mkdir(pathlib.Path(config['out_path']))
 
-    create_credentials(out_path, config['services'], config['default_key_alg'])
-
+    services = create_credentials(config)
+    print_services(services)
 
 if __name__ == '__main__':
     main()
