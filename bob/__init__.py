@@ -270,7 +270,7 @@ def read_config(config, json_data_file):
     """
     with json_data_file:
         loaded_conf = json.load(json_data_file)
-        config.update(loaded_conf)
+        config.update(loaded_conf["bob"])
         return config
 
 
@@ -343,7 +343,7 @@ def random_password(length):
     Returns:
         A random string cosisting out of ascii letters and the decimal digits.
     """
-    choices = string.ascii_letters + string.digits
+    choices = string.ascii_letters + string.digits + string.punctuation
     randdom_gen = (random.SystemRandom().choice(choices) for _ in range(length))
     return ''.join(randdom_gen)
 
