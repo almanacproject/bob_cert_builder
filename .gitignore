@@ -20,3 +20,4 @@ bob.egg-info/
 
 # Java garbage
 *.class
+bob_certbuilder.egg-info/
