@@ -126,8 +126,12 @@ class Certificate(ConvertMixin):
                 subject_str,
                 self.file,
                 self.key.file)
+
+    def get_cert_with_alias(self):
+        file = self.name_path('{}.cer.trusted.pem')
         openssl('x509 -in {} -setalias {} -out {}',
-                self.file, self.name, self.file)
+                self.file, self.name, file)
+        return file
 
     def convert_to_der(self):
         if 'DER' not in self.formats:
@@ -171,7 +175,7 @@ class Service(ConvertMixin):
             with password_pipe(self.password) as pipe_fd:
                 passout = 'fd:{}'.format(pipe_fd)
                 openssl_with_fds('pkcs12 -export -in {} -inkey {} -name {} -passout {} -out {}', (pipe_fd,),
-                                 self.cert.file, self.key.file, self.name, passout, store)
+                                 self.cert.get_cert_with_alias(), self.key.file, self.name, passout, store)
             self.formats['PKCS12'] = store
 
     def convert_to_jks_keystore(self):
