@@ -2,7 +2,7 @@
 
 set -e
 
-result_json=$(PYTHONPATH=".." python3 -m bob --config cert_conf.json)
+result_json=$(PYTHONPATH=".." python3 -m bob cert_conf.json)
 
 printf "%s" "$result_json" | jq .
 
