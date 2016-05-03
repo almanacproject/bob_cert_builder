@@ -262,6 +262,6 @@ def random_password(length):
     Returns:
         A random string cosisting out of ascii letters and the decimal digits.
     """
-    choices = string.ascii_letters + string.digits + string.punctuation
+    choices = string.ascii_letters + string.digits
     randdom_gen = (random.SystemRandom().choice(choices) for _ in range(length))
     return ''.join(randdom_gen)
