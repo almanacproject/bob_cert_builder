@@ -4,6 +4,7 @@ import shutil
 import sys
 import json
 import pathlib
+import time
 
 
 CONFIG = {
@@ -12,7 +13,8 @@ CONFIG = {
         "cert_file": "cert.pem",
         "key_file": "key.pem",
         "services": [],
-        "password_length": 10
+        "password_length": 10,
+        "wait": 0
 }
 
 
@@ -57,20 +59,16 @@ def print_services(services):
     print(json.dumps(gen))
 
 
-def create_credentials(config):
+def create_credentials(out_path, services, default_key_alg, pw_len):
     """ Create the creadentials for all services
 
     Args:
         out_path -- the path where the new certificates should be stored
-        service -- a list of the services
+        services -- a list of the services
         default_key_alg -- the default algorithmen for which keys should be created
     """
 
-    out_path = setup(config)
 
-    services = config['services']
-    default_key_alg = config['default_key_alg']
-    pw_len = config['password_length']
 
     service_dict = {}
 
@@ -83,12 +81,41 @@ def create_credentials(config):
         service = bob.Service(service_name, key_alg, out_path, confidant_names, formats, subject_str, pw_len)
         service_dict[service.name] = service
 
-    for service in service_dict.values():
-        for format in service.formats:
-            service.convert_to(format)
-        service.create_truststore(service_dict)
+    return service_dict
 
-    return service_dict.values()
+
+def create_truststore(service_dict, cert_path, wait_secs):
+    needed_confidants = set()
+    existing_certs = {}
+
+    for service in service_dict.values():
+        for confidant in service.confidants:
+            needed_confidants.add(confidant)
+    
+    for i in range(1,10):
+        time.sleep(10 * i)
+        if  len(needed_confidants - set(existing_certs.keys())) == 0:
+            break
+
+        preexisting_certs = {}
+        
+        for service_dir in cert_path.iterdir():
+            existing_cert = bob.PreexsitingCertificate(service_dir)
+            preexisting_certs[existing_cert.name] = existing_cert
+
+        preexisting_certs.update(service_dict)
+        existing_certs = preexisting_certs
+
+    try:
+        for service in service_dict.values():
+            for format in service.formats:
+                service.convert_to(format)
+            service.create_truststore(existing_certs)
+    except KeyError as e:
+        print('Could not create TrustStore"!',
+              '  There was no certificate for the service {}'.format(e.args),
+              sep='\n', file=sys.stderr)
+        sys.exit(2)
 
 
 def setup(config):
@@ -102,8 +129,17 @@ def main():
     args = parse_args()
     config = read_config(CONFIG, args.config)
 
-    services = create_credentials(config)
-    print_services(services)
+    cert_path = setup(config)
+    services = config['services']
+    default_key_alg = config['default_key_alg']
+    pw_len = config['password_length']
+    wait_secs = config['wait']
+
+    services = create_credentials(cert_path, services, default_key_alg, pw_len)
+
+    create_truststore(services, cert_path, wait_secs)
+
+    print_services(services.values())
 
 if __name__ == "__main__":
     main()

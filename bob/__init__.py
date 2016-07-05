@@ -104,7 +104,29 @@ class Key(ConvertMixin):
     format_fns = {'DER': convert_to_der}
 
 
-class Certificate(ConvertMixin):
+class CertificateBase(ConvertMixin):
+
+    def __init__(self, name, path):
+        self.name = name
+        self.path = path
+        self.file = self.name_path('{}.cer.pem')
+        self.formats = {}
+
+    def convert_to_der(self):
+        if 'DER' not in self.formats:
+            der_file = self.name_path('{}.cer.der')
+            openssl('x509 -outform DER -in {} -out {}', self.file, der_file)
+            self.formats['DER'] = der_file
+
+    def __str__(self):
+        return 'name: {0.name}, file: {0.file}'.format(self)
+    def __repr__(self):
+        return '{0.__class__.__name__}(name={0.name}, file={0.file})'.format(self)
+
+    format_fns = {'DER': convert_to_der}
+
+
+class Certificate(CertificateBase):
     """ Represantation of a certificate """
 
     def __init__(self, name, path, key, subject_str):
@@ -115,13 +137,9 @@ class Certificate(ConvertMixin):
             subject_str -- the subject string for the certificate
 
         """
-        self.name = name
-        self.path = path
+        super(Certificate, self).__init__(name, path)
         self.key = key
-        self.file = None
-        self.formats = {}
 
-        self.file = self.name_path('{}.cer.pem')
         openssl('req -new -days 365 -nodes -x509 -outform PEM -subj {} -out {} -key {}',
                 subject_str,
                 self.file,
@@ -133,13 +151,13 @@ class Certificate(ConvertMixin):
                 self.file, self.name, file)
         return file
 
-    def convert_to_der(self):
-        if 'DER' not in self.formats:
-            der_file = self.name_path('{}.cer.der')
-            openssl('x509 -outform DER -in {} -out {}', self.file, der_file)
-            self.formats['DER'] = der_file
 
-    format_fns = {'DER': convert_to_der}
+class PreexsitingCertificate(CertificateBase):
+    def __init__(self, path):
+        name = path.name
+        super(PreexsitingCertificate, self).__init__(name, path)
+
+        self.cert = self
 
 
 class Service(ConvertMixin):

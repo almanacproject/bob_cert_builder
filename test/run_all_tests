@@ -1,0 +1,4 @@
+#!/bin/sh
+
+(cd ./client_server; ./run_test)
+(cd ./predef_cert; ./run_test)
