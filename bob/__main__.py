@@ -93,7 +93,7 @@ def create_truststore(service_dict, cert_path, wait_secs):
             needed_confidants.add(confidant)
     
     for i in range(1,10):
-        time.sleep(10 * i)
+        time.sleep(wait_secs * i)
         if  len(needed_confidants - set(existing_certs.keys())) == 0:
             break
 
