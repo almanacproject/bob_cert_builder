@@ -5,6 +5,7 @@ import sys
 import json
 import pathlib
 import time
+import yaml
 
 
 CONFIG = {
@@ -24,10 +25,11 @@ def parse_args():
     parser.add_argument('config', default='./config/cert_conf.json',
                         type=argparse.FileType('r'),
                         help='configuration file for the creation of certificates')
+    parser.add_argument('service', nargs='*', help='the name of the service which needs to be inside the ')
     return parser.parse_args()
 
 
-def read_config(config, json_data_file):
+def read_config(config, data_file):
     """ Read the config for bob
 
     Args:
@@ -36,8 +38,8 @@ def read_config(config, json_data_file):
     Returns:
         the updated configuration
     """
-    with json_data_file:
-        loaded_conf = json.load(json_data_file)
+    with data_file:
+        loaded_conf = yaml.load(data_file)
         config.update(loaded_conf["bob"])
         return config
 
@@ -68,8 +70,6 @@ def create_credentials(out_path, services, default_key_alg, pw_len):
         default_key_alg -- the default algorithmen for which keys should be created
     """
 
-
-
     service_dict = {}
 
     for s in services:
@@ -91,14 +91,14 @@ def create_truststore(service_dict, cert_path, wait_secs):
     for service in service_dict.values():
         for confidant in service.confidants:
             needed_confidants.add(confidant)
-    
-    for i in range(1,10):
+
+    for i in range(1, 10):
         time.sleep(wait_secs * i)
-        if  len(needed_confidants - set(existing_certs.keys())) == 0:
+        if len(needed_confidants - set(existing_certs.keys())) == 0:
             break
 
         preexisting_certs = {}
-        
+
         for service_dir in cert_path.iterdir():
             existing_cert = bob.PreexsitingCertificate(service_dir)
             preexisting_certs[existing_cert.name] = existing_cert
