@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 
-import json
 import os
-import pathlib
 import random
 import shlex
 import string
@@ -33,7 +31,6 @@ def execute(tool, cmd, pass_fds, args, kwargs):
     qouted_command = cmd.format(*quoted_args, **qouted_kwargs)
 
     cmdline = [tool] + shlex.split(qouted_command)
-    # print(' '.join(cmdline))
     proc = subprocess.Popen(cmdline, pass_fds=pass_fds, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     proc.wait()
     if proc.returncode != 0:
@@ -120,6 +117,7 @@ class CertificateBase(ConvertMixin):
 
     def __str__(self):
         return 'name: {0.name}, file: {0.file}'.format(self)
+
     def __repr__(self):
         return '{0.__class__.__name__}(name={0.name}, file={0.file})'.format(self)
 
@@ -173,28 +171,29 @@ class Service(ConvertMixin):
         self.key = Key(name, self.path, key_alg)
         self.cert = Certificate(name, self.path, self.key, subject_str)
         self.formats = None
+        self.build_formats = None
 
         self.set_formats(formats)
 
     def set_formats(self, formats):
-        format_set = set(formats)
-        self.formats = dict.fromkeys(format_set, None)
-        self.formats['PEM'] = {'key': self.key.file, 'cert': self.cert.file}
+        self.formats = set(formats)
+        self.build_formats = {}
+        self.build_formats['PEM'] = {'key': self.key.file, 'cert': self.cert.file}
 
     def convert_to_der(self):
         self.key.convert_to_der()
         self.cert.convert_to_der()
-        self.formats['DER'] = {'key': self.key.formats['DER'], 'cert': self.cert.formats['DER']}
+        self.build_formats['DER'] = {'key': self.key.formats['DER'], 'cert': self.cert.formats['DER']}
 
     def convert_to_pkcs12_keystore(self):
-        if self.formats['PKCS12'] is None:
+        if self.build_formats.get('PKCS12', None) is None:
             filename = '{}.keystore.p12'.format(self.name)
             store = str(self.path.joinpath(filename))
             with password_pipe(self.password) as pipe_fd:
                 passout = 'fd:{}'.format(pipe_fd)
                 openssl_with_fds('pkcs12 -export -in {} -inkey {} -name {} -passout {} -out {}', (pipe_fd,),
                                  self.cert.get_cert_with_alias(), self.key.file, self.name, passout, store)
-            self.formats['PKCS12'] = store
+            self.build_formats['PKCS12'] = store
 
     def convert_to_jks_keystore(self):
         self.convert_to_pkcs12_keystore()
@@ -211,9 +210,9 @@ class Service(ConvertMixin):
                 '-srcstorepass {password} -deststorepass {password} '
                 '-srckeystore {srckeystore} -destkeystore {destkeystore} ',
                 password=self.password,
-                srckeystore=self.formats['PKCS12'],
+                srckeystore=self.build_formats['PKCS12'],
                 destkeystore=keystore_str)
-        self.formats['JKS'] = {'keystore': keystore_str}
+        self.build_formats['JKS'] = {'keystore': keystore_str}
 
     def create_truststore(self, service_dict):
         self.create_pem_truststore(service_dict)
@@ -238,7 +237,7 @@ class Service(ConvertMixin):
                     cert=der_cert,
                     keystore=truststore_str,
                     password=self.password)
-        self.formats['JKS']['truststore'] = truststore_str
+        self.build_formats['JKS']['truststore'] = truststore_str
 
     def create_pem_truststore(self, service_dict):
         filename = '{}.truststore.pem'.format(self.name)

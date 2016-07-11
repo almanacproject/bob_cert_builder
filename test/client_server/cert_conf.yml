@@ -1,5 +1,5 @@
 bob:   
-    wait: 100
+    wait: 0
     default_key_alg: "EC -pkeyopt ec_paramgen_curve:prime256v1 -pkeyopt ec_param_enc:named_curve"
     services:
           - name: "alice"
@@ -9,9 +9,10 @@ bob:
 
           - name: "bob"
             subject_str: "/C=DE/ST=NRW/L=Sankt Augustine/O=Fraunhofer/OU=FIT/CN=bob"
-            key_alg: "RSA -pkeyopt rsa_keygen_bits:4096"
             confidants: ["craig", "alice"]
+            formats: ["PEM"]
 
           - name: "craig"
             subject_str: "/C=DE/ST=NRW/L=Sankt Augustine/O=Fraunhofer/OU=FIT/CN=craig"
             confidants: ["bob", "alice"]
+            formats: ["PEM"]

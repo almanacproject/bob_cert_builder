@@ -46,19 +46,29 @@ def read_config(config, data_file):
 
 def test_for_cmds():
     if shutil.which('openssl') is None:
-        print('OpenSSL is missing')
+        print('OpenSSL is missing', file=sys.stderr)
         return False
 
     if shutil.which('keytool') is None:
-        print('Java KeyTool is missing')
+        print('Java KeyTool is missing', file=sys.stderr)
         return False
     return True
 
 
 def print_services(services):
-    gen = {service.name: {'password': service.password, 'formats': service.formats}
+    gen = {service.name: {'password': service.password, 'formats': service.build_formats}
            for service in services}
     print(json.dumps(gen))
+
+
+def make_config_set(value):
+    format_set = set()
+    if isinstance(value, str):
+        format_set.add(value)
+    else:
+        format_set |= set(value)
+
+    return format_set
 
 
 def create_credentials(out_path, services, default_key_alg, pw_len):
@@ -76,8 +86,13 @@ def create_credentials(out_path, services, default_key_alg, pw_len):
         service_name = s['name']
         subject_str = s['subject_str']
         key_alg = s.get('key_alg', default_key_alg)
-        confidant_names = s['confidants']
-        formats = ('DER', 'PKCS12', 'JKS')
+        confidant_names = make_config_set(s['confidants'])
+        formats = make_config_set(s['formats'])
+        try:
+            formats.remove('PEM')
+        except KeyError:
+            # Ignore if PEM is not there
+            pass
         service = bob.Service(service_name, key_alg, out_path, confidant_names, formats, subject_str, pw_len)
         service_dict[service.name] = service
 
