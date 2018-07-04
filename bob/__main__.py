@@ -39,7 +39,7 @@ def read_config(config, data_file):
         the updated configuration
     """
     with data_file:
-        loaded_conf = yaml.load(data_file)
+        loaded_conf = yaml.safe_load(data_file)
         config.update(loaded_conf["bob"])
         return config
 
@@ -155,6 +155,7 @@ def main():
     create_truststore(services, cert_path, wait_secs)
 
     print_services(services.values())
+
 
 if __name__ == "__main__":
     main()

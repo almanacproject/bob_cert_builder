@@ -1,15 +1,32 @@
 bob:
     default_key_alg: "EC -pkeyopt ec_paramgen_curve:prime256v1 -pkeyopt ec_param_enc:named_curve"
     services:
-          - name: "alice"
+          - name: "root"
             subject_str: "/C=DE/ST=NRW/L=Sankt Augustine/O=Fraunhofer/OU=FIT/CN=alice"
-            confidants: ["bob"]
+            confidants: []
+            formats: PEM
 
-          - name: "bob",
+          - name: "intermediat"
+            parent_cert: "root"
+            subject_str: "/C=DE/ST=NRW/L=Sankt Augustine/O=Fraunhofer/OU=FIT/CN=alice"
+            confidants: []
+            formats: PEM
+
+          - name: "alice"
+            parent_cert: "intermediat"
+            subject_str: "/C=DE/ST=NRW/L=Sankt Augustine/O=Fraunhofer/OU=FIT/CN=alice"
+            confidants: ["root"]
+            formats: PEM
+
+          - name: "bob"
+            parent_cert: "root"
             subject_str: "/C=DE/ST=NRW/L=Sankt Augustine/O=Fraunhofer/OU=FIT/CN=bob"
             key_alg: "RSA -pkeyopt rsa_keygen_bits:4096"
-            confidants: ["craig", "alice"]
+            confidants: ["intermediat"]
+            formats: JKS
 
-          - name: "craig",
+          - name: "craig"
+            parent_cert: "root"
             subject_str: "/C=DE/ST=NRW/L=Sankt Augustine/O=Fraunhofer/OU=FIT/CN=craig"
-            confidants: ["bob", "alice"]
+            confidants: ["root"]
+            formats: PEM
